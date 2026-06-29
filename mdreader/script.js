@@ -78,7 +78,7 @@
       if (!allowed.has(name)) continue;
       let value = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : (m[4] || '');
 
-      if (name === 'href' || name === 'src') value = sanitizeUrl(value);
+      if (name === 'href' || name === 'src') value = resolveAgainstBase(sanitizeUrl(value), renderBaseUrl);
       if (name === 'target') {
         if (['_blank', '_self', '_parent', '_top'].indexOf(value) === -1) continue;
         if (value === '_blank') sawBlankTarget = true;
