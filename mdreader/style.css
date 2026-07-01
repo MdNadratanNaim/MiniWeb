@@ -1,4 +1,63 @@
 /* =========================================================
+   md.reader — local fonts
+   ========================================================= */
+@font-face {
+  font-family: 'Space Mono';
+  src: url('../fonts/Space mono/SpaceMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Space Mono';
+  src: url('../fonts/Space mono/SpaceMono-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Cabinet Grotesk';
+  src: url('../fonts/Cabinet Grotesk/CabinetGrotesk-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Cabinet Grotesk';
+  src: url('../fonts/Cabinet Grotesk/CabinetGrotesk-Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Cabinet Grotesk';
+  src: url('../fonts/Cabinet Grotesk/CabinetGrotesk-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('../fonts/Lora/Lora-VariableFont_wght.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lora';
+  src: url('../fonts/Lora/Lora-Italic-VariableFont_wght.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* =========================================================
    md.reader — tokens
    ========================================================= */
 :root {
@@ -17,9 +76,9 @@
   --code-bg: #1B1F23;
   --code-text: #F1EEE3;
 
-  --serif: 'Fraunces', Georgia, serif;
-  --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  --serif: 'Lora', Georgia, serif;
+  --sans: 'Cabinet Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'Space Mono', 'SF Mono', Consolas, monospace;
 
   --radius: 4px;
   --max-width: 70%;
@@ -188,7 +247,7 @@ body {
   font-family: var(--serif);
   font-weight: 600;
   font-size: clamp(2.1rem, 5vw, 3.1rem);
-  line-height: 1.08;
+  line-height: 1.1;
   letter-spacing: -0.01em;
   margin: 0 0 16px;
   color: var(--ink);
@@ -429,7 +488,9 @@ body {
   max-width: var(--max-width);
   margin: 0 auto;
   padding: 40px 24px 100px;
-  font-size: 1.05rem;
+  font-family: var(--serif);
+  font-size: 1.12rem;
+  line-height: 1.7;
   color: var(--ink);
 }
 .md-content h1, .md-content h2, .md-content h3,
@@ -440,10 +501,10 @@ body {
   line-height: 1.25;
   margin: 1.6em 0 0.6em;
 }
-.md-content h1 { font-size: 2.1rem; margin-top: 0; }
-.md-content h2 { font-size: 1.55rem; border-top: 1px solid var(--line); padding-top: 0.9em; }
-.md-content h3 { font-size: 1.25rem; }
-.md-content h4 { font-size: 1.05rem; }
+.md-content h1 { font-size: 2.3rem; margin-top: 0; letter-spacing: -0.01em; }
+.md-content h2 { font-size: 1.7rem; border-top: 1px solid var(--line); padding-top: 0.9em; letter-spacing: -0.005em; }
+.md-content h3 { font-size: 1.35rem; }
+.md-content h4 { font-size: 1.1rem; }
 
 .md-content p { margin: 1em 0; }
 .md-content a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--line-strong); }
