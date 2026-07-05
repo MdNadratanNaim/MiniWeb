@@ -68,6 +68,7 @@
   --slate: #6B7280;
   --line: #E2DFD2;
   --line-strong: #D2CDBC;
+  --blockquote-background: #d5d5d5;
   --accent: #2A52E3;
   --accent-soft: #EAF0FF;
   --error: #B3401E;
@@ -95,6 +96,7 @@
   --slate: #8B8A80;
   --line: #2A2D35;
   --line-strong: #3A3E48;
+  --blockquote-background: #3A3E48;
   --accent: #7C97FF;
   --accent-soft: #1E2540;
   --error: #FF8569;
@@ -541,10 +543,17 @@ body {
 
 .md-content blockquote {
   margin: 1.4em 0;
-  padding: 2px 0 2px 18px;
+  padding: 4px 0 5px 18px;
   border-left: 3px solid var(--accent);
   color: var(--ink-soft);
   font-style: italic;
+  background-color: var(--blockquote-background);
+}
+.md-content blockquote > *:first-child {
+  margin-top: 0;
+}
+.md-content blockquote > *:last-child {
+  margin-bottom: 0;
 }
 
 .md-content ul, .md-content ol {

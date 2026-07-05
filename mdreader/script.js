@@ -256,6 +256,7 @@
     return text;
   }
 
+
   // Indentation width of a line, counting a tab as 4 columns — used by
   // parseListItems() to tell nested list items apart from their parents.
   function leadingSpaces(line) {
@@ -265,15 +266,70 @@
     return n;
   }
 
+  // Strips up to `cols` leading columns (tab = 4) and returns whatever's
+  // left untouched — used to unindent a list item's nested block content
+  // (e.g. a fenced code block) by exactly its marker's indent, without
+  // disturbing indentation that's meaningful *within* that content (like a
+  // code block's own internal indentation).
+  function dedentLine(line, cols) {
+    let removed = 0, idx = 0;
+    while (idx < line.length && removed < cols) {
+      removed += line[idx] === '\t' ? 4 : 1;
+      idx++;
+    }
+    return line.slice(idx);
+  }
+
+  function splitRow(row) {
+    const cells = row.split('|');
+    if (cells.length && cells[0].trim() === '') cells.shift();
+    if (cells.length && cells[cells.length - 1].trim() === '') cells.pop();
+    return cells.map(function (c) { return c.trim(); });
+  }
+  // Reads alignment (left/center/right) off the "---", ":---", "---:",
+  // ":---:" separator row cells; null means no explicit alignment.
+  function parseAlign(sepRow) {
+    return splitRow(sepRow).map(function (c) {
+      const left = c.charAt(0) === ':';
+      const right = c.charAt(c.length - 1) === ':';
+      if (left && right) return 'center';
+      if (right) return 'right';
+      if (left) return 'left';
+      return null;
+    });
+  }
+  function renderTable(rows) {
+    if (rows.length < 2) return '';
+    const head = splitRow(rows[0]);
+    const aligns = parseAlign(rows[1]);
+    const body = rows.slice(2).map(splitRow);
+    function alignAttr(idx) {
+      return aligns[idx] ? ' style="text-align:' + aligns[idx] + '"' : '';
+    }
+    let t = '<table><thead><tr>';
+    head.forEach(function (c, idx) { t += '<th' + alignAttr(idx) + '>' + parseInline(c) + '</th>'; });
+    t += '</tr></thead><tbody>';
+    body.forEach(function (r) {
+      t += '<tr>';
+      r.forEach(function (c, idx) { t += '<td' + alignAttr(idx) + '>' + parseInline(c) + '</td>'; });
+      t += '</tr>';
+    });
+    t += '</tbody></table>\n';
+    return t;
+  }
+
   const LIST_ITEM_RE = /^[ \t]*(?:[-*+]|\d+[.)])\s+/;
 
   // Parses a run of list items starting at lines[startIdx], all indented at
   // exactly `indent`. Recurses into itself for any more-indented block
   // immediately under an item, which lets a nested "- " or "1. " become a
   // nested <ul>/<ol> rather than flattening into its parent's <li> text.
-  // Plain (non-list) indented lines under an item are treated as a wrapped
-  // paragraph continuation of that item instead. Returns the rendered HTML
-  // for this list plus the line index just past it.
+  // A continuation line under an item is either: a nested list (recurse),
+  // a "#"-heading or fenced code block (rendered as a real block — this is
+  // what makes "> ### Heading"-style content work *inside* a list item
+  // too, not just at the top level), or otherwise a wrapped paragraph line
+  // that's folded into the item's own inline text. Returns the rendered
+  // HTML for this list plus the line index just past it.
   function parseListItems(lines, startIdx, indent) {
     let i = startIdx;
     let type = null, start = null;
@@ -318,12 +374,21 @@
       }
 
       i++;
-      const contentLines = [content];
-      let nestedHtml = '';
 
-      // Everything more-indented than this item (until a line dedents back
-      // to `indent` or shallower) belongs to it: either a nested sub-list or
-      // a wrapped continuation line of the item's own paragraph text.
+      // bodyParts accumulates the item's content in document order: plain
+      // text runs get merged and inline-parsed (kept un-wrapped, so a
+      // simple item still renders as tight "<li>text</li>" instead of
+      // "<li><p>text</p></li>"), while a heading/fence/nested-list found
+      // partway through becomes its own real block at that point.
+      const bodyParts = [];
+      let textBuf = [content];
+      function flushText() {
+        if (textBuf.length) {
+          bodyParts.push(parseInline(textBuf.join(' ')));
+          textBuf = [];
+        }
+      }
+
       while (i < lines.length) {
         const l = lines[i];
 
@@ -338,17 +403,45 @@
         if (lIndent <= indent) break;
 
         if (LIST_ITEM_RE.test(l)) {
+          flushText();
           const sub = parseListItems(lines, i, lIndent);
-          nestedHtml += sub.html;
+          bodyParts.push(sub.html);
           i = sub.next;
           continue;
         }
 
-        contentLines.push(l.trim());
+        const trimmed = l.trim();
+
+        const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+        if (headingMatch) {
+          flushText();
+          const level = headingMatch[1].length;
+          bodyParts.push('<h' + level + '>' + parseInline(headingMatch[2].trim()) + '</h' + level + '>\n');
+          i++; continue;
+        }
+
+        const fenceMatch = trimmed.match(/^```(.*)$/);
+        if (fenceMatch) {
+          flushText();
+          const lang = fenceMatch[1].trim();
+          const codeLines = [];
+          i++;
+          while (i < lines.length && lines[i].trim() !== '```') {
+            codeLines.push(dedentLine(lines[i], indent));
+            i++;
+          }
+          if (i < lines.length) i++; // consume the closing fence
+          bodyParts.push('<pre><code class="lang-' + (lang || 'text') + '">' +
+            escapeHtml(codeLines.join('\n')) + '</code></pre>\n');
+          continue;
+        }
+
+        textBuf.push(trimmed);
         i++;
       }
+      flushText();
 
-      itemsHtml += '<li>' + checkboxHtml + parseInline(contentLines.join(' ')) + nestedHtml + '</li>';
+      itemsHtml += '<li>' + checkboxHtml + bodyParts.join('') + '</li>';
     }
 
     if (!type) return { html: '', next: startIdx };
@@ -356,37 +449,19 @@
     return { html: '<' + type + startAttr + '>' + itemsHtml + '</' + type + '>\n', next: i };
   }
 
-  // Block-level: headers, paragraphs, lists, blockquotes, code fences, tables, hr.
-  // baseUrl: the URL the markdown was fetched from (omitted for local file
-  // uploads), used to resolve relative image/link paths — see resolveAgainstBase().
-  function parseMarkdown(src, baseUrl) {
-    renderBaseUrl = baseUrl || null;
-    src = (src || '').replace(/\r\n?/g, '\n');
-    const lines = src.split('\n');
-
-    // Pre-scan reference-style link/image definitions ("[ref]: url \"title\"")
-    // anywhere in the document, so they can be used before or after they're
-    // declared. Definition lines are blanked out in place — they render as
-    // nothing themselves, matching normal markdown behavior — everything
-    // else is left untouched and at its original line index.
-    const linkRefs = {};
-    const linkDefRe = /^[ \t]{0,3}\[([^\]]+)\]:\s*(\S+)(?:\s+"([^"]*)")?\s*$/;
-    for (let li = 0; li < lines.length; li++) {
-      const dm = lines[li].match(linkDefRe);
-      if (dm) {
-        linkRefs[dm[1].toLowerCase()] = { url: dm[2], title: dm[3] || '' };
-        lines[li] = '';
-      }
-    }
-    renderLinkRefs = linkRefs;
-
+  // Block-level: headers, paragraphs, lists, blockquotes, code fences,
+  // tables, hr. Assumes renderBaseUrl / renderLinkRefs are already set by
+  // the top-level parseMarkdown() call below. Also called recursively for
+  // blockquote contents, so a ">" can contain *any* block content — headings,
+  // lists, code fences, nested quotes, multiple paragraphs — the same as the
+  // top level, instead of only ever being inline-parsed as one flat line.
+  function parseBlocks(lines) {
     let html = '';
     let i = 0;
 
     let inCode = false, codeLang = '', codeBuf = [];
     let inMath = false, mathBuf = [];
     let paraBuf = []; // { text, brk } — brk marks a hard line break after this line
-    let quoteBuf = [];
 
     function flushPara() {
       if (paraBuf.length) {
@@ -398,49 +473,6 @@
         paraBuf = [];
       }
     }
-    function flushQuote() {
-      if (quoteBuf.length) {
-        html += '<blockquote>' + parseInline(quoteBuf.join(' ')) + '</blockquote>\n';
-        quoteBuf = [];
-      }
-    }
-    function splitRow(row) {
-      const cells = row.split('|');
-      if (cells.length && cells[0].trim() === '') cells.shift();
-      if (cells.length && cells[cells.length - 1].trim() === '') cells.pop();
-      return cells.map(function (c) { return c.trim(); });
-    }
-    // Reads alignment (left/center/right) off the "---", ":---", "---:",
-    // ":---:" separator row cells; null means no explicit alignment.
-    function parseAlign(sepRow) {
-      return splitRow(sepRow).map(function (c) {
-        const left = c.charAt(0) === ':';
-        const right = c.charAt(c.length - 1) === ':';
-        if (left && right) return 'center';
-        if (right) return 'right';
-        if (left) return 'left';
-        return null;
-      });
-    }
-    function flushTable(rows) {
-      if (rows.length < 2) return;
-      const head = splitRow(rows[0]);
-      const aligns = parseAlign(rows[1]);
-      const body = rows.slice(2).map(splitRow);
-      function alignAttr(idx) {
-        return aligns[idx] ? ' style="text-align:' + aligns[idx] + '"' : '';
-      }
-      let t = '<table><thead><tr>';
-      head.forEach(function (c, idx) { t += '<th' + alignAttr(idx) + '>' + parseInline(c) + '</th>'; });
-      t += '</tr></thead><tbody>';
-      body.forEach(function (r) {
-        t += '<tr>';
-        r.forEach(function (c, idx) { t += '<td' + alignAttr(idx) + '>' + parseInline(c) + '</td>'; });
-        t += '</tr>';
-      });
-      t += '</tbody></table>\n';
-      html += t;
-    }
 
     while (i < lines.length) {
       const line = lines[i];
@@ -449,7 +481,7 @@
       const fence = line.match(/^```(.*)$/);
       if (fence) {
         if (!inCode) {
-          flushPara(); flushQuote();
+          flushPara();
           inCode = true; codeLang = fence[1].trim(); codeBuf = [];
         } else {
           html += '<pre><code class="lang-' + (codeLang || 'text') + '">' +
@@ -466,7 +498,7 @@
       const mathFence = /^\$\$\s*$/.test(line);
       if (mathFence) {
         if (!inMath) {
-          flushPara(); flushQuote();
+          flushPara();
           inMath = true; mathBuf = [];
         } else {
           html += '<div class="math-display">' +
@@ -479,7 +511,7 @@
 
       // blank line ends current block
       if (/^\s*$/.test(line)) {
-        flushPara(); flushQuote();
+        flushPara();
         i++; continue;
       }
 
@@ -503,7 +535,7 @@
       // headers
       const header = line.match(/^(#{1,6})\s+(.*)$/);
       if (header) {
-        flushPara(); flushQuote();
+        flushPara();
         const level = header[1].length;
         html += '<h' + level + '>' + parseInline(header[2].trim()) + '</h' + level + '>\n';
         i++; continue;
@@ -511,7 +543,7 @@
 
       // horizontal rule
       if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
-        flushPara(); flushQuote();
+        flushPara();
         html += '<hr>\n';
         i++; continue;
       }
@@ -519,30 +551,53 @@
       // table: a row with "|" followed by a separator row of dashes/colons/pipes
       if (line.indexOf('|') !== -1 && lines[i + 1] &&
           /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].indexOf('-') !== -1) {
-        flushPara(); flushQuote();
+        flushPara();
         const rows = [line, lines[i + 1]];
         i += 2;
         while (i < lines.length && lines[i].indexOf('|') !== -1 && !/^\s*$/.test(lines[i])) {
           rows.push(lines[i]); i++;
         }
-        flushTable(rows);
+        html += renderTable(rows);
         continue;
       }
 
-      // blockquote
-      const quote = line.match(/^>\s?(.*)$/);
-      if (quote) {
+      // blockquote: gather every "> "-prefixed line (plus blank lines that
+      // are followed by more quote lines, so multi-paragraph quotes stay in
+      // one blockquote) and recurse through this same block parser on the
+      // dedented content — so a "> ### Heading", "> - list item", or
+      // "> ```code```" all render as real blocks, and "> > nested" becomes
+      // a nested <blockquote>, instead of only ever being inline text.
+      if (/^>\s?/.test(line)) {
         flushPara();
-        quoteBuf.push(quote[1]);
-        i++; continue;
+        const quoteLines = [];
+        while (i < lines.length) {
+          const qm = lines[i].match(/^>\s?(.*)$/);
+          if (qm) {
+            quoteLines.push(qm[1]);
+            i++;
+            continue;
+          }
+          if (/^\s*$/.test(lines[i])) {
+            let j = i + 1;
+            while (j < lines.length && /^\s*$/.test(lines[j])) j++;
+            if (j < lines.length && /^>\s?/.test(lines[j])) {
+              quoteLines.push('');
+              i = j;
+              continue;
+            }
+          }
+          break;
+        }
+        html += '<blockquote>\n' + parseBlocks(quoteLines) + '</blockquote>\n';
+        continue;
       }
 
       // lists (unordered "-*+" or ordered "1." / "1)"), with nesting,
-      // mixed ul/ol, task-list checkboxes, and multi-line item text —
-      // fully handled by parseListItems, which consumes every line that
-      // belongs to this list (including nested sub-lists) in one go.
+      // mixed ul/ol, task-list checkboxes, headings/code fences inside an
+      // item, and multi-line item text — fully handled by parseListItems,
+      // which consumes every line that belongs to this list in one go.
       if (LIST_ITEM_RE.test(line)) {
-        flushPara(); flushQuote();
+        flushPara();
         const result = parseListItems(lines, i, leadingSpaces(line));
         html += result.html;
         i = result.next;
@@ -551,7 +606,6 @@
 
       // plain paragraph text — a trailing double-space (or backslash) means
       // a hard line break rather than just wrapping to the next line.
-      flushQuote();
       paraBuf.push({
         text: line.trim().replace(/\\$/, '').trim(),
         brk: /(?: {2,}|\\)$/.test(line)
@@ -565,9 +619,36 @@
     if (inMath) {
       html += '<div class="math-display">' + escapeHtml('$$' + mathBuf.join('\n')) + '</div>\n';
     }
-    flushPara(); flushQuote();
+    flushPara();
 
     return html;
+  }
+
+  // Entry point. baseUrl: the URL the markdown was fetched from (omitted
+  // for local file uploads), used to resolve relative image/link paths —
+  // see resolveAgainstBase().
+  function parseMarkdown(src, baseUrl) {
+    renderBaseUrl = baseUrl || null;
+    src = (src || '').replace(/\r\n?/g, '\n');
+    const lines = src.split('\n');
+
+    // Pre-scan reference-style link/image definitions ("[ref]: url \"title\"")
+    // anywhere in the document, so they can be used before or after they're
+    // declared. Definition lines are blanked out in place — they render as
+    // nothing themselves, matching normal markdown behavior — everything
+    // else is left untouched and at its original line index.
+    const linkRefs = {};
+    const linkDefRe = /^[ \t]{0,3}\[([^\]]+)\]:\s*(\S+)(?:\s+"([^"]*)")?\s*$/;
+    for (let li = 0; li < lines.length; li++) {
+      const dm = lines[li].match(linkDefRe);
+      if (dm) {
+        linkRefs[dm[1].toLowerCase()] = { url: dm[2], title: dm[3] || '' };
+        lines[li] = '';
+      }
+    }
+    renderLinkRefs = linkRefs;
+
+    return parseBlocks(lines);
   }
 
   /* ---------------------------------------------------------
